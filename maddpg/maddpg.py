@@ -60,9 +60,15 @@ class MADDPG:
         r = transitions['r_%d' % self.agent_id]  # 训练时只需要自己的reward
         o, u, o_next = [], [], []  # 用来装每个agent经验中的各项
         for agent_id in range(self.args.n_agents):
-            o.append(transitions['o_%d' % agent_id])
-            u.append(transitions['u_%d' % agent_id])
-            o_next.append(transitions['o_next_%d' % agent_id])
+            # print(len(o_next))
+            if agent_id == self.args.odits_agent_id:
+                o.append("Hold")
+                u.append("Hold")
+                o_next.append("Hold")
+            else:
+                o.append(transitions['o_%d' % agent_id])
+                u.append(transitions['u_%d' % agent_id])
+                o_next.append(transitions['o_next_%d' % agent_id])
 
         # calculate the target Q value function
         u_next = []
@@ -72,22 +78,43 @@ class MADDPG:
             for agent_id in range(self.args.n_agents):
                 if agent_id == self.agent_id:
                     u_next.append(self.actor_target_network(o_next[agent_id]))
-                else:
-                    # 因为传入的other_agents要比总数少一个，可能中间某个agent是当前agent，不能遍历去选择动作
+                elif agent_id != self.args.odits_agent_id:
+                    # # 因为传入的other_agents要比总数少一个，可能中间某个agent是当前agent，不能遍历去选择动作
                     u_next.append(other_agents[index].policy.actor_target_network(o_next[agent_id]))
                     index += 1
+
+            
+            t = []
+            for obj in o_next:
+                if obj == "Hold":
+                    continue
+                t.append(obj)
+            o_next = t
+            # print(len(o_next), len(u_next))
+            # print(o_next)
             q_next = self.critic_target_network(o_next, u_next).detach()
 
             target_q = (r.unsqueeze(1) + self.args.gamma * q_next).detach()
 
+        t_o = []
+        for obj in o:
+            if obj == "Hold":
+                continue
+            t_o.append(obj)
+
+        t_u = []
+        for obj in u:
+            if obj == "Hold":
+                continue
+            t_u.append(obj)
         # the q loss
-        q_value = self.critic_network(o, u)
+        q_value = self.critic_network(t_o, t_u)
         critic_loss = (target_q - q_value).pow(2).mean()
 
         # the actor loss
         # 重新选择联合动作中当前agent的动作，其他agent的动作不变
         u[self.agent_id] = self.actor_network(o[self.agent_id])
-        actor_loss = - self.critic_network(o, u).mean()
+        actor_loss = - self.critic_network(t_o, t_u).mean()
         # if self.agent_id == 0:
         #     print('critic_loss is {}, actor_loss is {}'.format(critic_loss, actor_loss))
         # update the network

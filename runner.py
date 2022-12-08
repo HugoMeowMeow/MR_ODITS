@@ -1,5 +1,6 @@
 from tqdm import tqdm
 from agent import Agent
+import agent_odits
 from common.replay_buffer import Buffer
 import torch
 import os
@@ -23,7 +24,10 @@ class Runner:
     def _init_agents(self):
         agents = []
         for i in range(self.args.n_agents):
-            agent = Agent(i, self.args)
+            if i == self.args.odits_agent_id:
+                agent = agent_odits.Agent(i, self.args)
+            else:
+                agent = Agent(i, self.args)
             agents.append(agent)
         return agents
 
@@ -37,7 +41,10 @@ class Runner:
             actions = []
             with torch.no_grad():
                 for agent_id, agent in enumerate(self.agents):
-                    action = agent.select_action(s[agent_id], self.noise, self.epsilon)
+                    if agent_id == self.args.odits_agent_id:
+                        action = agent.select_action(s[agent_id], None, self.noise, self.epsilon)
+                    else:
+                        action = agent.select_action(s[agent_id], self.noise, self.epsilon)
                     u.append(action)
                     actions.append(action)
             for i in range(self.args.n_agents, self.args.n_players):
@@ -47,9 +54,13 @@ class Runner:
             s = s_next
             if self.buffer.current_size >= self.args.batch_size:
                 transitions = self.buffer.sample(self.args.batch_size)
+                # print(self.args.batch_size, transitions['o_0'].shape)
                 for agent in self.agents:
                     other_agents = self.agents.copy()
                     other_agents.remove(agent)
+                    if  self.args.odits_agent_id >= 0 and agent.agent_id != self.args.odits_agent_id:
+                        odits = self.agents[self.args.odits_agent_id]
+                        other_agents.remove(odits)
                     agent.learn(transitions, other_agents)
             if time_step > 0 and time_step % self.args.evaluate_rate == 0:
                 returns.append(self.evaluate())
@@ -67,17 +78,24 @@ class Runner:
         for episode in range(self.args.evaluate_episodes):
             # reset the environment
             s = self.env.reset()
+            odits_done = None
             rewards = 0
             for time_step in range(self.args.evaluate_episode_len):
                 self.env.render()
                 actions = []
                 with torch.no_grad():
                     for agent_id, agent in enumerate(self.agents):
-                        action = agent.select_action(s[agent_id], 0, 0)
+                        if agent_id == self.args.odits_agent_id:
+                            action = agent.select_action(s[agent_id], odits_done, 0, 0)
+                            if len(action.shape) == 2:
+                                action = action[0]
+                        else:
+                            action = agent.select_action(s[agent_id], 0, 0)
                         actions.append(action)
                 for i in range(self.args.n_agents, self.args.n_players):
                     actions.append([0, np.random.rand() * 2 - 1, 0, np.random.rand() * 2 - 1, 0])
                 s_next, r, done, info = self.env.step(actions)
+                odits_done = actions[self.args.odits_agent_id]
                 rewards += r[0]
                 s = s_next
             returns.append(rewards)

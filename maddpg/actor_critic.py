@@ -26,7 +26,13 @@ class Critic(nn.Module):
     def __init__(self, args):
         super(Critic, self).__init__()
         self.max_action = args.high_action
-        self.fc1 = nn.Linear(sum(args.obs_shape) + sum(args.action_shape), 64)
+        # print("Critic",args.obs_shape, args.action_shape, sum(args.obs_shape) + sum(args.action_shape))
+        self.input_shape = sum(args.obs_shape) + sum(args.action_shape)
+        
+        if args.odits_agent_id >= 0:
+            self.input_shape = self.input_shape - args.obs_shape[args.odits_agent_id] - args.action_shape[args.odits_agent_id]
+            
+        self.fc1 = nn.Linear(self.input_shape, 64)
         self.fc2 = nn.Linear(64, 64)
         self.fc3 = nn.Linear(64, 64)
         self.q_out = nn.Linear(64, 1)
